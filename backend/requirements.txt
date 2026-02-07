@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pgvector
+alembic
+python-dotenv
+openai
+langchain
+langchain-community
+langchain-openai
+langchain-postgres
+pymupdf4llm
+rank_bm25
+sentence-transformers
+numpy
+pydantic
