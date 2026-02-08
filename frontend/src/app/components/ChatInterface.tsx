@@ -75,6 +75,10 @@ export default function ChatInterface() {
   const [selectedReference, setSelectedReference] =
     useState<ReferenceItem | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(
+    new Set(),
+  );
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const chatLogRef = useRef<HTMLElement | null>(null);
@@ -93,7 +97,8 @@ export default function ChatInterface() {
     cancelStreaming,
     selectSession,
     startNewSession,
-    clearAllSessions,
+    removeSessions,
+    deletingSessions,
     runKeywordSearch,
   } = useChat();
 
@@ -111,6 +116,20 @@ export default function ChatInterface() {
     return "";
   }, [statusText, isStreaming]);
 
+  const allSessionIds = useMemo(
+    () => sessions.map((session) => session.session_id),
+    [sessions],
+  );
+
+  const isAllSessionsSelected = useMemo(() => {
+    if (allSessionIds.length === 0) {
+      return false;
+    }
+    return allSessionIds.every((id) => selectedSessionIds.has(id));
+  }, [allSessionIds, selectedSessionIds]);
+
+  const selectedSessionCount = selectedSessionIds.size;
+
   useEffect(() => {
     const container = chatLogRef.current;
     if (!container) {
@@ -118,6 +137,19 @@ export default function ChatInterface() {
     }
     container.scrollTop = container.scrollHeight;
   }, [messages, visibleStatus]);
+
+  useEffect(() => {
+    setSelectedSessionIds((prev) => {
+      const alive = new Set(allSessionIds);
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (alive.has(id)) {
+          next.add(id);
+        }
+      }
+      return next;
+    });
+  }, [allSessionIds]);
 
   const handleSend = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -163,6 +195,44 @@ export default function ChatInterface() {
   const handleSearchSubmit = async (event: FormEvent) => {
     event.preventDefault();
     await runKeywordSearch(searchKeyword);
+  };
+
+  const handleToggleSessionSelection = (sessionId: number) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleDeleteMode = () => {
+    setIsDeleteMode((prev) => {
+      if (prev) {
+        setSelectedSessionIds(new Set());
+      }
+      return !prev;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (isAllSessionsSelected) {
+      setSelectedSessionIds(new Set());
+      return;
+    }
+    setSelectedSessionIds(new Set(allSessionIds));
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedSessionCount === 0 || deletingSessions) {
+      return;
+    }
+    await removeSessions(Array.from(selectedSessionIds));
+    setSelectedSessionIds(new Set());
+    setIsDeleteMode(false);
   };
 
   return (
@@ -253,12 +323,25 @@ export default function ChatInterface() {
                 <button
                   key={session.session_id}
                   type="button"
-                  className={`session-item ${activeSessionId === session.session_id ? "active" : ""}`}
+                  className={`session-item ${
+                    activeSessionId === session.session_id ? "active" : ""
+                  } ${isDeleteMode ? "selecting" : ""} ${
+                    selectedSessionIds.has(session.session_id) ? "selected" : ""
+                  }`}
                   onClick={() => {
+                    if (isDeleteMode) {
+                      handleToggleSessionSelection(session.session_id);
+                      return;
+                    }
                     void selectSession(session.session_id);
                   }}
-                  disabled={isStreaming}
+                  disabled={isStreaming || deletingSessions}
                 >
+                  {isDeleteMode && (
+                    <span className="session-check" aria-hidden="true">
+                      {selectedSessionIds.has(session.session_id) ? "✓" : ""}
+                    </span>
+                  )}
                   <strong>{session.title}</strong>
                   <p>{session.last_message_preview || "대화 시작"}</p>
                   <span>{formatRelativeTime(session.last_message_at)}</span>
@@ -268,15 +351,47 @@ export default function ChatInterface() {
           </div>
 
           <div className="sidebar-bottom">
-            <button
-              type="button"
-              className="danger-btn"
-              onClick={() => void clearAllSessions()}
-              disabled={isStreaming}
-            >
-              <Trash2 size={15} />
-              전체 채팅 삭제
-            </button>
+            {!isDeleteMode ? (
+              <button
+                type="button"
+                className="danger-btn"
+                onClick={handleToggleDeleteMode}
+                disabled={isStreaming || sessions.length === 0 || deletingSessions}
+              >
+                <Trash2 size={15} />
+                채팅 삭제
+              </button>
+            ) : (
+              <div className="delete-mode-actions">
+                <button
+                  type="button"
+                  className="sidebar-btn"
+                  onClick={handleToggleSelectAll}
+                  disabled={isStreaming || sessions.length === 0 || deletingSessions}
+                >
+                  <Square size={15} />
+                  {isAllSessionsSelected ? "전체 선택 해제" : "전체 선택"}
+                </button>
+                <button
+                  type="button"
+                  className="danger-btn"
+                  onClick={() => void handleDeleteSelected()}
+                  disabled={isStreaming || selectedSessionCount === 0 || deletingSessions}
+                >
+                  <Trash2 size={15} />
+                  선택 삭제 ({selectedSessionCount})
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={handleToggleDeleteMode}
+                  disabled={isStreaming || deletingSessions}
+                >
+                  <X size={15} />
+                  취소
+                </button>
+              </div>
+            )}
           </div>
         </aside>
       )}

@@ -59,6 +59,14 @@ class ChatSearchResult(BaseModel):
     created_at: datetime
 
 
+class DeleteSessionsRequest(BaseModel):
+    session_ids: list[int] = Field(default_factory=list, min_length=1)
+
+
+class DeleteSessionsResponse(BaseModel):
+    deleted_count: int
+
+
 class UploadResponse(BaseModel):
     filename: str
     document_id: int

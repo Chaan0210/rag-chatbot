@@ -75,3 +75,7 @@ export interface ChatSearchResult {
   snippet: string
   created_at: string
 }
+
+export interface DeleteSessionsResponse {
+  deleted_count: number
+}

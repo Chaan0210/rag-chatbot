@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   deleteAllSessions,
+  deleteSelectedSessions,
   fetchSessionMessages,
   listSessions,
   searchChatMessages,
@@ -218,6 +219,30 @@ export function useChat() {
     },
   })
 
+  const deleteSelectedMutation = useMutation({
+    mutationFn: async (sessionIds: number[]) => deleteSelectedSessions(sessionIds),
+    onSuccess: async (_data, sessionIds) => {
+      const removed = new Set(sessionIds)
+      if (activeSessionId !== null && removed.has(activeSessionId)) {
+        setActiveSessionId(null)
+        setMessages([])
+        setStandaloneQuery('')
+        setStatusText('')
+        setRetrievalScore(null)
+        setRetrievalAttempts(1)
+      }
+      setSearchResults([])
+      setError('')
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+      if (activeSessionId !== null) {
+        await queryClient.invalidateQueries({ queryKey: ['sessionMessages', activeSessionId] })
+      }
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : '채팅 삭제 중 오류가 발생했습니다.')
+    },
+  })
+
   const sendMessage = useCallback(
     async (text: string) => {
       await sendMutation.mutateAsync(text)
@@ -268,6 +293,17 @@ export function useChat() {
     await deleteAllMutation.mutateAsync()
   }, [deleteAllMutation])
 
+  const removeSessions = useCallback(
+    async (sessionIds: number[]) => {
+      const targetIds = Array.from(new Set(sessionIds.filter((item) => item > 0)))
+      if (targetIds.length === 0) {
+        return
+      }
+      await deleteSelectedMutation.mutateAsync(targetIds)
+    },
+    [deleteSelectedMutation],
+  )
+
   const runKeywordSearch = useCallback(
     async (keyword: string) => {
       const trimmed = keyword.trim()
@@ -300,5 +336,7 @@ export function useChat() {
     startNewSession,
     clearAllSessions,
     runKeywordSearch,
+    removeSessions,
+    deletingSessions: deleteSelectedMutation.isPending || deleteAllMutation.isPending,
   }
 }

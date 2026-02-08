@@ -4,7 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas.chat import ChatSearchResult, SessionMessage, SessionMessagesResponse, SessionSummary
+from app.api.schemas.chat import (
+    ChatSearchResult,
+    DeleteSessionsRequest,
+    DeleteSessionsResponse,
+    SessionMessage,
+    SessionMessagesResponse,
+    SessionSummary,
+)
 from app.core.config import settings
 from app.db.models import ChatMessage, ChatSession
 from app.db.session import get_db
@@ -91,6 +98,24 @@ async def delete_all_sessions(db: AsyncSession = Depends(get_db)) -> dict:
     await db.execute(delete(ChatSession))
     await db.commit()
     return {"status": "ok"}
+
+
+@router.delete("/sessions/selected", response_model=DeleteSessionsResponse)
+async def delete_selected_sessions(
+    payload: DeleteSessionsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> DeleteSessionsResponse:
+    session_ids = sorted({item for item in payload.session_ids if item > 0})
+    if not session_ids:
+        return DeleteSessionsResponse(deleted_count=0)
+
+    existing_ids = set((await db.scalars(select(ChatSession.id).where(ChatSession.id.in_(session_ids)))).all())
+    if not existing_ids:
+        return DeleteSessionsResponse(deleted_count=0)
+
+    await db.execute(delete(ChatSession).where(ChatSession.id.in_(existing_ids)))
+    await db.commit()
+    return DeleteSessionsResponse(deleted_count=len(existing_ids))
 
 
 @router.get("/sessions/search", response_model=list[ChatSearchResult])

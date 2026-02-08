@@ -176,6 +176,41 @@
   font: inherit;
 }
 
+.session-item.selecting {
+  position: relative;
+  padding-right: 2rem;
+}
+
+.session-item.selected {
+  border-color: #2f5abf;
+  background: #f4f8ff;
+}
+
+.session-check {
+  position: absolute;
+  right: 0.55rem;
+  top: 0.55rem;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid #8f9cac;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  line-height: 1;
+  font-weight: 700;
+  color: #ffffff;
+  background: #ffffff;
+  margin: 0;
+  pointer-events: none;
+}
+
+.session-item.selected .session-check {
+  background: #2f5abf;
+  border-color: #2f5abf;
+}
+
 .session-item strong {
   display: block;
   font-size: 0.86rem;
@@ -201,6 +236,11 @@
 .sidebar-bottom {
   border-top: 1px solid #e4ddcf;
   padding: 0.8rem;
+}
+
+.delete-mode-actions {
+  display: grid;
+  gap: 0.45rem;
 }
 
 .danger-btn {

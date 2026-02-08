@@ -4,6 +4,7 @@ import type {
   ChatFinalEvent,
   ChatRequest,
   ChatSearchResult,
+  DeleteSessionsResponse,
   SessionMessagesResponse,
   SessionSummary,
   UploadResponse,
@@ -150,6 +151,20 @@ export async function deleteAllSessions(): Promise<void> {
   if (!response.ok) {
     throw new Error(`Failed to delete sessions (${response.status})`)
   }
+}
+
+export async function deleteSelectedSessions(sessionIds: number[]): Promise<DeleteSessionsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/sessions/selected`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ session_ids: sessionIds }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to delete selected sessions (${response.status})`)
+  }
+  return (await response.json()) as DeleteSessionsResponse
 }
 
 export async function searchChatMessages(keyword: string): Promise<ChatSearchResult[]> {
