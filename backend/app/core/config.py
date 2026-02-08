@@ -67,6 +67,8 @@ class Settings:
     multi_query_count: int = int(os.getenv("MULTI_QUERY_COUNT", "5"))
     retrieval_max_attempts: int = int(os.getenv("RETRIEVAL_MAX_ATTEMPTS", "3"))
     retrieval_quality_threshold: float = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.55"))
+    stream_chunk_size: int = max(1, int(os.getenv("STREAM_CHUNK_SIZE", "1")))
+    stream_chunk_delay_ms: float = max(0.0, float(os.getenv("STREAM_CHUNK_DELAY_MS", "30")))
 
 
 @lru_cache(maxsize=1)

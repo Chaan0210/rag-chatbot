@@ -29,9 +29,6 @@ function mapSessionMessage(message: SessionMessage): ChatMessage {
 export function useChat() {
   const queryClient = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
-  const streamAssistantIdRef = useRef<string | null>(null)
-  const streamQueueRef = useRef<string[]>([])
-  const streamTimerRef = useRef<number | null>(null)
 
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -42,87 +39,23 @@ export function useChat() {
   const [retrievalAttempts, setRetrievalAttempts] = useState<number>(1)
   const [searchResults, setSearchResults] = useState<ChatSearchResult[]>([])
 
-  const stopDeltaPump = useCallback(() => {
-    if (streamTimerRef.current !== null) {
-      window.clearInterval(streamTimerRef.current)
-      streamTimerRef.current = null
-    }
-  }, [])
-
-  const flushQueuedDelta = useCallback((assistantId?: string) => {
-    const targetAssistantId = assistantId ?? streamAssistantIdRef.current
-    if (!targetAssistantId) {
-      streamQueueRef.current = []
-      stopDeltaPump()
-      return
-    }
-
-    const queuedText = streamQueueRef.current.join('')
-    streamQueueRef.current = []
-    stopDeltaPump()
-
-    if (!queuedText) {
+  const appendDelta = useCallback((assistantId: string, delta: string) => {
+    if (!delta) {
       return
     }
 
     setMessages((prev) =>
       prev.map((item) => {
-        if (item.id !== targetAssistantId) {
+        if (item.id !== assistantId) {
           return item
         }
         return {
           ...item,
-          content: `${item.content}${queuedText}`,
+          content: `${item.content}${delta}`,
         }
       }),
     )
-  }, [stopDeltaPump])
-
-  const enqueueDelta = useCallback((assistantId: string, delta: string) => {
-    if (!delta) {
-      return
-    }
-
-    streamAssistantIdRef.current = assistantId
-    streamQueueRef.current.push(delta)
-
-    if (streamTimerRef.current !== null) {
-      return
-    }
-
-    streamTimerRef.current = window.setInterval(() => {
-      const targetAssistantId = streamAssistantIdRef.current
-      if (!targetAssistantId) {
-        streamQueueRef.current = []
-        stopDeltaPump()
-        return
-      }
-
-      const nextDelta = streamQueueRef.current.shift()
-      if (!nextDelta) {
-        stopDeltaPump()
-        return
-      }
-
-      setMessages((prev) =>
-        prev.map((item) => {
-          if (item.id !== targetAssistantId) {
-            return item
-          }
-          return {
-            ...item,
-            content: `${item.content}${nextDelta}`,
-          }
-        }),
-      )
-    }, 45)
-  }, [stopDeltaPump])
-
-  useEffect(() => {
-    return () => {
-      stopDeltaPump()
-    }
-  }, [stopDeltaPump])
+  }, [])
 
   const sessionsQuery = useQuery({
     queryKey: ['sessions'],
@@ -207,18 +140,14 @@ export function useChat() {
               setRetrievalAttempts(attempts)
             },
             onDelta: (delta) => {
-              enqueueDelta(assistantMessageId, delta)
+              appendDelta(assistantMessageId, delta)
             },
             onFinal: (payload) => {
-              flushQueuedDelta(assistantMessageId)
               setRetrievalScore(payload.retrieval_score ?? null)
               setRetrievalAttempts(payload.retrieval_attempts ?? 1)
               updateAssistant((current) => ({
                 ...current,
-                content:
-                  current.content.trim().length >= Math.max(24, Math.floor(payload.answer.trim().length * 0.55))
-                    ? current.content
-                    : payload.answer,
+                content: current.content.length > 0 ? current.content : payload.answer,
                 references: payload.references,
                 confidence: payload.confidence,
                 standaloneQuery: payload.standalone_query,
@@ -227,7 +156,6 @@ export function useChat() {
               setStatusText('')
             },
             onError: (messageText) => {
-              flushQueuedDelta(assistantMessageId)
               setError(messageText)
               updateAssistant((current) => ({
                 ...current,
@@ -239,7 +167,6 @@ export function useChat() {
           },
         )
       } catch (streamError) {
-        flushQueuedDelta(assistantMessageId)
         if (!controller.signal.aborted) {
           const messageText = streamError instanceof Error ? streamError.message : 'Unknown streaming error'
           setError(messageText)
@@ -257,9 +184,6 @@ export function useChat() {
       } finally {
         setStatusText('')
         abortRef.current = null
-        stopDeltaPump()
-        streamQueueRef.current = []
-        streamAssistantIdRef.current = null
 
         await queryClient.invalidateQueries({ queryKey: ['sessions'] })
         if (resolvedSessionId !== null) {
@@ -302,14 +226,13 @@ export function useChat() {
   )
 
   const cancelStreaming = useCallback(() => {
-    flushQueuedDelta()
     abortRef.current?.abort()
     abortRef.current = null
     setMessages((prev) =>
       prev.map((item) => (item.isStreaming ? { ...item, isStreaming: false } : item)),
     )
     setStatusText('')
-  }, [flushQueuedDelta])
+  }, [])
 
   const selectSession = useCallback(
     async (sessionId: number) => {

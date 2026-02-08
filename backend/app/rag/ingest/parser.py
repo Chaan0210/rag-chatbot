@@ -30,6 +30,7 @@ TABLE_LAYOUT_SPLIT_PATTERN = re.compile(r"\s{2,}|\t+")
 TABLE_LAYOUT_GAP_PATTERN = re.compile(r"\S(?:\s{2,}|\t)\S")
 NOTE_PATTERN = re.compile(r"^(주\)|주석|각주|\*|note\b)", re.IGNORECASE)
 NUMBER_TOKEN_PATTERN = re.compile(r"^\(?[-+]?\d[\d,]*(?:\.\d+)?%?\)?$")
+GENERIC_TABLE_COLUMN_PATTERN = re.compile(r"\b(?:col\d+|unnamed:?\d*)\b", re.IGNORECASE)
 FINANCIAL_HINT_PATTERN = re.compile(
     r"(매출|영업이익|순이익|손익|실적|재무|revenue|operating|income|profit|margin|qoq|yoy)",
     re.IGNORECASE,
@@ -102,6 +103,90 @@ def _split_long_block(block: str, max_chars: int, overlap: int = 0) -> list[str]
 
 def _is_table_block(block: str) -> bool:
     return bool(TABLE_MARKDOWN_PATTERN.search(block))
+
+
+def _split_markdown_row(line: str) -> list[str]:
+    stripped = line.strip()
+    if not (stripped.startswith("|") and stripped.endswith("|")):
+        return []
+    return [item.strip() for item in stripped.strip("|").split("|")]
+
+
+def _table_rows(block: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped or "|" not in stripped:
+            continue
+        if TABLE_HEADER_PATTERN.match(stripped):
+            continue
+        cells = _split_markdown_row(stripped)
+        if len(cells) >= 2:
+            rows.append(cells)
+    return rows
+
+
+def _is_low_quality_table_block(block: str) -> bool:
+    rows = _table_rows(block)
+    if len(rows) < 2:
+        return False
+
+    header_joined = " ".join(rows[0]).strip()
+    if header_joined and GENERIC_TABLE_COLUMN_PATTERN.search(header_joined):
+        return True
+
+    stacked_label_rows = 0
+    repeated_first_cells: Counter[str] = Counter()
+    for row in rows[1:]:
+        first_cell = row[0]
+        br_count_first = first_cell.lower().count("<br>")
+        br_count_others = max((cell.lower().count("<br>") for cell in row[1:]), default=0)
+        if br_count_first >= 6 and br_count_others >= 6:
+            stacked_label_rows += 1
+            normalized_first = _normalize_block_text(first_cell)
+            if normalized_first:
+                repeated_first_cells[normalized_first] += 1
+
+    if stacked_label_rows >= 1:
+        return True
+    if any(count >= 2 for count in repeated_first_cells.values()):
+        return True
+    return False
+
+
+def _contains_low_quality_table(page_text: str) -> bool:
+    blocks = [block.strip() for block in re.split(r"\n{2,}", page_text) if block.strip()]
+    for block in blocks:
+        if not _is_table_block(block):
+            continue
+        if _is_low_quality_table_block(block):
+            return True
+    return False
+
+
+def _replace_low_quality_tables(page_text: str, fallback_tables: list[str]) -> tuple[str, int]:
+    blocks = [block.strip() for block in re.split(r"\n{2,}", page_text) if block.strip()]
+    kept_blocks: list[str] = []
+    kept_normalized: set[str] = set()
+    dropped = 0
+
+    for block in blocks:
+        if _is_table_block(block) and _is_low_quality_table_block(block):
+            dropped += 1
+            continue
+        normalized = _normalize_block_text(block)
+        if normalized:
+            kept_normalized.add(normalized)
+        kept_blocks.append(block)
+
+    for table in fallback_tables:
+        normalized = _normalize_block_text(table)
+        if not normalized or normalized in kept_normalized:
+            continue
+        kept_blocks.append(table.strip())
+        kept_normalized.add(normalized)
+
+    return "\n\n".join(kept_blocks).strip(), dropped
 
 
 def _is_note_block(block: str) -> bool:
@@ -193,6 +278,8 @@ def _should_attempt_table_fallback(page_text: str) -> bool:
 
     # Already has markdown table structure.
     if _is_table_block(body) or TABLE_HEADER_PATTERN.search(body):
+        if _contains_low_quality_table(body):
+            return True
         return False
 
     density = _numeric_density(body)
@@ -618,18 +705,30 @@ async def process_pdf(file_path: str, filename: str, db: AsyncSession) -> dict:
             if not page_text:
                 page_text = "\n\n".join([fallback_raw, *fallback_tables]).strip()
             elif fallback_tables:
-                existing_blocks = {
-                    _normalize_block_text(block)
-                    for block in re.split(r"\n{2,}", page_text)
-                    if block.strip()
-                }
-                new_tables = [
-                    table
-                    for table in fallback_tables
-                    if table.strip() and _normalize_block_text(table) not in existing_blocks
-                ]
-                if new_tables:
-                    page_text = "\n\n".join([page_text, *new_tables]).strip()
+                if _contains_low_quality_table(page_text):
+                    replaced_page_text, dropped_blocks = _replace_low_quality_tables(page_text, fallback_tables)
+                    if replaced_page_text:
+                        logger.info(
+                            "Replaced low-quality table blocks with fallback tables file=%s page=%s dropped_blocks=%s fallback_tables=%s",
+                            filename,
+                            effective_page_number,
+                            dropped_blocks,
+                            len(fallback_tables),
+                        )
+                        page_text = replaced_page_text
+                else:
+                    existing_blocks = {
+                        _normalize_block_text(block)
+                        for block in re.split(r"\n{2,}", page_text)
+                        if block.strip()
+                    }
+                    new_tables = [
+                        table
+                        for table in fallback_tables
+                        if table.strip() and _normalize_block_text(table) not in existing_blocks
+                    ]
+                    if new_tables:
+                        page_text = "\n\n".join([page_text, *new_tables]).strip()
 
             if not page_text:
                 continue

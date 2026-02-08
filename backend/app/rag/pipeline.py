@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -58,6 +59,67 @@ def _chunk_trace(chunk: Chunk) -> dict[str, Any]:
         "year": meta.get("year", ""),
         "quarter": meta.get("quarter", ""),
     }
+
+
+def _table_chunk_key(chunk: Chunk) -> tuple[str, str] | None:
+    meta = chunk.metadata_json or {}
+    chunk_type = str(meta.get("chunk_type", "")).lower()
+    if chunk_type != "table":
+        return None
+    source = str(meta.get("source", "")).strip()
+    page = str(meta.get("page", chunk.page_number)).strip()
+    if not source or not page:
+        return None
+    return source, page
+
+
+async def _augment_with_table_page_siblings(chunks: list[Chunk], db: AsyncSession, limit: int) -> list[Chunk]:
+    if not chunks:
+        return chunks
+
+    keys: list[tuple[str, str]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for chunk in chunks:
+        key = _table_chunk_key(chunk)
+        if key is None or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        keys.append(key)
+
+    if not keys:
+        return chunks
+
+    siblings_by_key: dict[tuple[str, str], list[Chunk]] = {}
+    for source, page in keys:
+        stmt = (
+            select(Chunk)
+            .where(Chunk.metadata_json["chunk_type"].astext == "table")
+            .where(Chunk.metadata_json["source"].astext == source)
+            .where(Chunk.metadata_json["page"].astext == page)
+            .order_by(Chunk.id)
+        )
+        siblings = (await db.execute(stmt)).scalars().all()
+        siblings_by_key[(source, page)] = siblings
+
+    augmented: list[Chunk] = []
+    seen_ids: set[int] = set()
+    for chunk in chunks:
+        if chunk.id not in seen_ids:
+            seen_ids.add(chunk.id)
+            augmented.append(chunk)
+
+        key = _table_chunk_key(chunk)
+        if key is None:
+            continue
+        for sibling in siblings_by_key.get(key, []):
+            if sibling.id in seen_ids:
+                continue
+            seen_ids.add(sibling.id)
+            augmented.append(sibling)
+
+    if limit > 0 and len(augmented) > limit:
+        return augmented[:limit]
+    return augmented
 
 
 def _tokenize(text: str) -> list[str]:
@@ -212,6 +274,9 @@ async def retrieve_with_retry(
             )
 
         reranked = await rerank_candidates(question, flattened, settings.max_context_chunks)
+        # Keep table page siblings even if it slightly exceeds top-k, to avoid losing
+        # split header/body table chunks that must be read together.
+        reranked = await _augment_with_table_page_siblings(reranked, db, limit=0)
 
         evaluation_mode = "llm"
         cheap_eval: dict[str, Any] | None = None

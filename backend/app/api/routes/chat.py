@@ -224,9 +224,10 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)) 
                 retrieval_meta.get("best_score"),
             )
 
-            for piece in split_stream_text(result["answer"]):
+            for piece in split_stream_text(result["answer"], chunk_size=settings.stream_chunk_size):
                 yield _sse_event("delta", {"text": piece})
-                await asyncio.sleep(0.01)
+                if settings.stream_chunk_delay_ms > 0:
+                    await asyncio.sleep(settings.stream_chunk_delay_ms / 1000)
 
             attempts = retrieval_meta.get("attempts", [])
             yield _sse_event(

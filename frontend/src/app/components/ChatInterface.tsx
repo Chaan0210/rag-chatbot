@@ -82,11 +82,8 @@ export default function ChatInterface() {
   const {
     activeSessionId,
     messages,
-    standaloneQuery,
     error,
     statusText,
-    retrievalScore,
-    retrievalAttempts,
     isStreaming,
     sessions,
     sessionsLoading,
@@ -318,17 +315,6 @@ export default function ChatInterface() {
             />
           </div>
         </header>
-
-        <section className="chat-status">
-          <span>세션: {activeSessionId ?? "새 채팅"}</span>
-          {standaloneQuery && <span>Standalone Query: {standaloneQuery}</span>}
-          {retrievalScore !== null && (
-            <span>
-              Retrieval Score: {retrievalScore.toFixed(2)} (시도{" "}
-              {retrievalAttempts}회)
-            </span>
-          )}
-        </section>
 
         <main className="chat-log" aria-live="polite" ref={chatLogRef}>
           {!hasMessages ? (
