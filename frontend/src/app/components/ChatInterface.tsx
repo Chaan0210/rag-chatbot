@@ -120,15 +120,25 @@ export default function ChatInterface() {
     () => sessions.map((session) => session.session_id),
     [sessions],
   );
+  const sessionIdSet = useMemo(() => new Set(allSessionIds), [allSessionIds]);
+  const selectedExistingSessionIds = useMemo(() => {
+    const next = new Set<number>();
+    for (const id of selectedSessionIds) {
+      if (sessionIdSet.has(id)) {
+        next.add(id);
+      }
+    }
+    return next;
+  }, [selectedSessionIds, sessionIdSet]);
 
   const isAllSessionsSelected = useMemo(() => {
     if (allSessionIds.length === 0) {
       return false;
     }
-    return allSessionIds.every((id) => selectedSessionIds.has(id));
-  }, [allSessionIds, selectedSessionIds]);
+    return allSessionIds.every((id) => selectedExistingSessionIds.has(id));
+  }, [allSessionIds, selectedExistingSessionIds]);
 
-  const selectedSessionCount = selectedSessionIds.size;
+  const selectedSessionCount = selectedExistingSessionIds.size;
 
   useEffect(() => {
     const container = chatLogRef.current;
@@ -137,19 +147,6 @@ export default function ChatInterface() {
     }
     container.scrollTop = container.scrollHeight;
   }, [messages, visibleStatus]);
-
-  useEffect(() => {
-    setSelectedSessionIds((prev) => {
-      const alive = new Set(allSessionIds);
-      const next = new Set<number>();
-      for (const id of prev) {
-        if (alive.has(id)) {
-          next.add(id);
-        }
-      }
-      return next;
-    });
-  }, [allSessionIds]);
 
   const handleSend = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -230,7 +227,7 @@ export default function ChatInterface() {
     if (selectedSessionCount === 0 || deletingSessions) {
       return;
     }
-    await removeSessions(Array.from(selectedSessionIds));
+    await removeSessions(Array.from(selectedExistingSessionIds));
     setSelectedSessionIds(new Set());
     setIsDeleteMode(false);
   };
@@ -326,7 +323,9 @@ export default function ChatInterface() {
                   className={`session-item ${
                     activeSessionId === session.session_id ? "active" : ""
                   } ${isDeleteMode ? "selecting" : ""} ${
-                    selectedSessionIds.has(session.session_id) ? "selected" : ""
+                    selectedExistingSessionIds.has(session.session_id)
+                      ? "selected"
+                      : ""
                   }`}
                   onClick={() => {
                     if (isDeleteMode) {
@@ -339,7 +338,9 @@ export default function ChatInterface() {
                 >
                   {isDeleteMode && (
                     <span className="session-check" aria-hidden="true">
-                      {selectedSessionIds.has(session.session_id) ? "✓" : ""}
+                      {selectedExistingSessionIds.has(session.session_id)
+                        ? "✓"
+                        : ""}
                     </span>
                   )}
                   <strong>{session.title}</strong>
